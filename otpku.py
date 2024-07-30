@@ -1,5 +1,7 @@
+import time
 import requests
 from tabulate import tabulate
+import sys
 
 def read_api_key(file_path):
     with open(file_path, 'r') as file:
@@ -15,9 +17,8 @@ def connect(api_key, url, post_data=None):
         else:
             response = requests.get(url, headers=headers)
         
-        response.raise_for_status()  # Memastikan HTTP request berhasil
-        print("Status kode:", response.status_code)  # Menampilkan kode status
-        return response.json()  # Mengembalikan hasil sebagai JSON
+        response.raise_for_status()
+        return response.json()
     except requests.exceptions.RequestException as e:
         print(f"Terjadi kesalahan saat menghubungi API: {e}")
         return None
@@ -45,11 +46,10 @@ def get_services(api_key):
 def display_services(services):
     if services is None or services.get("status") == False:
         print("Status:", services.get("status") if services else "Unknown")
-        print("Pesan:", services.get("data", {}).get("msg", "Tidak ada pesan error."))
+        print("Pesan:", services.get("msg", "Tidak ada pesan error."))
     else:
         data = services.get("data", [])
         if isinstance(data, list) and data:
-            # Mengatur data dalam format tabel
             table = []
             for item in data:
                 table.append([
@@ -65,6 +65,58 @@ def display_services(services):
             print(tabulate(table, headers=headers, tablefmt="grid"))
         else:
             print("Tidak ada data untuk ditampilkan.")
+
+def display_result(result, headers, key='data'):
+    if result.get("status") == False:
+        print("Status:", result.get("status"))
+        print("Pesan:", result.get("msg", ""))
+    else:
+        data = result.get(key)
+        if isinstance(data, list):
+            table = []
+            for item in data:
+                table.append([item.get(h, '') for h in headers])
+            print(tabulate(table, headers=headers, tablefmt="grid"))
+        elif isinstance(data, dict):
+            table = [[data.get(h, '') for h in headers]]
+            print(tabulate(table, headers=headers, tablefmt="grid"))
+        else:
+            print("Tidak ada data untuk ditampilkan.")
+
+def loading_animation():
+    chars = "/—\\|"
+    for char in chars:
+        sys.stdout.write('\r' + 'Loading ' + char)
+        time.sleep(.1)
+        sys.stdout.flush()
+
+def get_sms_otp_until_received(api_key):
+    while True:
+        result = get_sms_otp(api_key)
+        if result.get("status") == False:
+            print("Status:", result.get("status"))
+            print("Pesan:", result.get("msg", ""))
+            break
+        
+        data = result.get("data", [])
+        if isinstance(data, list) and data:
+            otp_status = data[0].get("otp", "Waiting SMS Code")
+            order_status = data[0].get("status", "Pending")
+
+            if order_status == "Pending":
+                print("Pesanan masih Pending, tidak akan melakukan pengecekan ulang.")
+                break
+            elif order_status == "Ready" and otp_status != "Waiting SMS Code":
+                headers = ["id", "status", "number", "otp", "sms", "more_codes", "service_name", "remain_tie", "remain_time"]
+                display_result(result, headers)
+                break
+            else:
+                print("Menunggu kode SMS...")
+                loading_animation()
+                time.sleep(5)
+        else:
+            print("Tidak ada data untuk ditampilkan.")
+            break
 
 def main():
     api_key = read_api_key('api_key.txt')
@@ -87,16 +139,19 @@ def main():
                 print("Operator tidak valid. Pilih dari telkomsel, axis, indosat, atau any.")
             else:
                 result = create_order(api_key, service_id, operator)
-                print("Hasil:", result)
+                print("Hasil:")
+                headers = ["id", "number", "operator", "service_id", "service_name"]
+                display_result(result, headers, key="data")
         
         elif choice == '2':
-            result = get_sms_otp(api_key)
-            print("Hasil:", result)
+            get_sms_otp_until_received(api_key)
         
         elif choice == '3':
             order_id = input("Masukkan ID pesanan: ")
             result = check_status(api_key, order_id)
-            print("Hasil:", result)
+            print("Hasil:")
+            headers = ["id", "status", "number", "sms", "more_codes", "service_name"]
+            display_result(result, headers, key="data")
         
         elif choice == '4':
             order_id = input("Masukkan ID pesanan: ")
@@ -105,7 +160,9 @@ def main():
                 print("Status tidak valid. Pilih dari 1=ready, 2=cancel, 3=resend, 4=selesai.")
             else:
                 result = set_status(api_key, order_id, status)
-                print("Hasil:", result)
+                print("Hasil:")
+                headers = ["id", "number", "service_name"]
+                display_result(result, headers, key="data")
         
         elif choice == '5':
             services = get_services(api_key)
